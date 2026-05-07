@@ -14,6 +14,10 @@ namespace TestForm
         [STAThread]
         static void Main()
         {
+            int a,b,c;
+            a=0;
+            b=10;
+            c= b/a;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());
