@@ -21,6 +21,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Generate PR Diff
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
@@ -37,9 +40,15 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
 
-          DIFF_CONTENT=$(head -c 120000 pr.diff)
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret missing"
+            exit 1
+          fi
 
-          PROMPT="You are an expert .NET and SQL enterprise code reviewer.
+          DIFF_CONTENT=$(head -c 100000 pr.diff)
+
+          cat > prompt.txt <<EOF
+You are an expert .NET and SQL enterprise code reviewer.
 
 Review the following pull request diff carefully.
 
@@ -65,10 +74,11 @@ Provide concise actionable recommendations with severity levels (Critical, High,
 
 PR Diff:
 
-$DIFF_CONTENT"
+$DIFF_CONTENT
+EOF
 
           jq -n \
-            --arg prompt "$PROMPT" \
+            --rawfile prompt prompt.txt \
             '{
               model: "claude-3-5-sonnet-20241022",
               max_tokens: 2000,
@@ -80,18 +90,26 @@ $DIFF_CONTENT"
               ]
             }' > request.json
 
-          curl https://api.anthropic.com/v1/messages \
+          echo "Claude request prepared"
+
+          HTTP_CODE=$(curl https://api.anthropic.com/v1/messages \
             --silent \
+            --output review.json \
+            --write-out "%{http_code}" \
             --request POST \
             --header "x-api-key: $ANTHROPIC_API_KEY" \
             --header "anthropic-version: 2023-06-01" \
             --header "content-type: application/json" \
-            --data @request.json \
-            > review.json
+            --data @request.json)
 
-          echo "Claude response received"
+          echo "HTTP Status: $HTTP_CODE"
 
           cat review.json
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Claude API call failed"
+            exit 1
+          fi
 
           COMMENT=$(jq -r '.content[0].text // "No review comments generated."' review.json)
 
