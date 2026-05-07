@@ -21,62 +21,65 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        id: diff
+      - name: Generate PR Diff
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
 
           git diff \
             origin/${{ github.event.pull_request.base.ref }}...HEAD \
+            -- '*.cs' '*.csproj' '*.json' '*.yml' '*.yaml' '*.sql' \
             > pr.diff
 
-          echo "DIFF<<EOF" >> $GITHUB_ENV
-          cat pr.diff >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "Diff generated"
 
       - name: Review PR with Claude
-        id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          REVIEW=$(curl https://api.anthropic.com/v1/messages \
+
+          DIFF_CONTENT=$(head -c 120000 pr.diff)
+
+          jq -n \
+            --arg diff "$DIFF_CONTENT" \
+            '{
+              model: "claude-3-5-sonnet-20241022",
+              max_tokens: 2000,
+              messages: [
+                {
+                  role: "user",
+                  content:
+                  "You are an expert .NET and SQL enterprise code reviewer.\n\nReview the following pull request diff carefully.\n\nFocus on:\n- C# coding standards\n- SOLID principles\n- ASP.NET Core best practices\n- SQL query optimization\n- SQL injection vulnerabilities\n- Stored procedure best practices\n- Transaction handling\n- EF Core optimization\n- Async/await issues\n- Exception handling\n- Logging gaps\n- Memory leaks\n- Security vulnerabilities\n- Maintainability\n- Possible production bugs\n- Code readability\n\nProvide concise actionable recommendations with severity levels (Critical, High, Medium, Low).\n\nPR Diff:\n\n" + $diff
+                }
+              ]
+            }' > request.json
+
+          curl https://api.anthropic.com/v1/messages \
             --silent \
             --request POST \
             --header "x-api-key: $ANTHROPIC_API_KEY" \
             --header "anthropic-version: 2023-06-01" \
             --header "content-type: application/json" \
-            --data "$(jq -n \
-              --arg diff "$DIFF" \
-              '{
-                model: "claude-3-5-sonnet-20241022",
-                max_tokens: 2000,
-                messages: [
-                  {
-                    role: "user",
-                    content:
-                      "You are a senior .NET code reviewer.\n\nReview this pull request diff carefully.\n\nFocus on:\n- C# best practices\n- ASP.NET Core patterns\n- Performance issues\n- Security vulnerabilities\n- Clean architecture\n- SOLID principles\n- Entity Framework issues\n- Async/await misuse\n- Logging and exception handling\n- Possible bugs\n- Code readability\n\nProvide concise actionable feedback.\n\nGit diff:\n\n" + $diff
-                  }
-                ]
-              }')" )
+            --data @request.json \
+            > review.json
 
-          echo "$REVIEW" > review.json
+          echo "Claude response received"
 
-          COMMENT=$(cat review.json | jq -r '.content[0].text')
+          COMMENT=$(jq -r '.content[0].text // "No review comments generated."' review.json)
 
           echo "COMMENT<<EOF" >> $GITHUB_ENV
           echo "$COMMENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Post review comment
+      - name: Post PR Comment
         uses: actions/github-script@v7
+        env:
+          COMMENT: ${{ env.COMMENT }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const body = process.env.COMMENT;
-
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## Claude AI Code Review\n\n${body}`
+              body: `## Claude AI Review\n\n${process.env.COMMENT}`
             });
