@@ -21,33 +21,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Generate PR Diff
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
 
-          git diff \
-            origin/${{ github.event.pull_request.base.ref }}...HEAD \
+          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD \
             -- '*.cs' '*.csproj' '*.json' '*.yml' '*.yaml' '*.sql' \
             > pr.diff
 
           echo "Diff generated"
 
-      - name: Review PR with Claude
+      - name: Create Claude Request
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          python3 - << 'PYTHON'
+          import json
 
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ANTHROPIC_API_KEY secret missing"
-            exit 1
-          fi
+          with open("pr.diff", "r", encoding="utf-8") as f:
+              diff = f.read()[:100000]
 
-          DIFF_CONTENT=$(head -c 100000 pr.diff)
-
-          cat > prompt.txt <<EOF
+          prompt = f"""
 You are an expert .NET and SQL enterprise code reviewer.
 
 Review the following pull request diff carefully.
@@ -74,59 +68,67 @@ Provide concise actionable recommendations with severity levels (Critical, High,
 
 PR Diff:
 
-$DIFF_CONTENT
-EOF
+{diff}
+"""
 
-          jq -n \
-            --rawfile prompt prompt.txt \
-            '{
-              model: "claude-3-5-sonnet-20241022",
-              max_tokens: 2000,
-              messages: [
-                {
-                  role: "user",
-                  content: $prompt
-                }
+          body = {
+              "model": "claude-3-5-sonnet-20241022",
+              "max_tokens": 2000,
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": prompt
+                  }
               ]
-            }' > request.json
+          }
 
-          echo "Claude request prepared"
+          with open("request.json", "w", encoding="utf-8") as f:
+              json.dump(body, f)
+          PYTHON
 
-          HTTP_CODE=$(curl https://api.anthropic.com/v1/messages \
+      - name: Call Claude API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          curl https://api.anthropic.com/v1/messages \
             --silent \
-            --output review.json \
-            --write-out "%{http_code}" \
             --request POST \
             --header "x-api-key: $ANTHROPIC_API_KEY" \
             --header "anthropic-version: 2023-06-01" \
             --header "content-type: application/json" \
-            --data @request.json)
-
-          echo "HTTP Status: $HTTP_CODE"
+            --data @request.json \
+            > review.json
 
           cat review.json
 
-          if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "Claude API call failed"
-            exit 1
-          fi
+      - name: Extract Review Comment
+        run: |
+          python3 - << 'PYTHON'
+          import json
 
-          COMMENT=$(jq -r '.content[0].text // "No review comments generated."' review.json)
+          with open("review.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-          echo "COMMENT<<EOF" >> $GITHUB_ENV
-          echo "$COMMENT" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          comment = "No review comments generated."
+
+          if "content" in data:
+              comment = data["content"][0]["text"]
+
+          with open("comment.txt", "w", encoding="utf-8") as f:
+              f.write(comment)
+          PYTHON
 
       - name: Post PR Comment
         uses: actions/github-script@v7
-        env:
-          COMMENT: ${{ env.COMMENT }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('comment.txt', 'utf8');
+
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## Claude AI Review\n\n${process.env.COMMENT}`
+              body: `## Claude AI Review\n\n${comment}`
             });
