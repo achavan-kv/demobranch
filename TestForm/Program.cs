@@ -18,6 +18,7 @@ namespace TestForm
             a=0;
             b=10;
             c= b/a;
+            c=a;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());
