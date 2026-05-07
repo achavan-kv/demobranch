@@ -5,32 +5,47 @@ import requests
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 with open("pr.diff", "r", encoding="utf-8") as f:
-    diff = f.read()[:100000]
+    diff = f.read()
+
+# Prevent token overflow
+diff = diff[:100000]
 
 prompt = f"""
-You are an expert .NET and SQL enterprise code reviewer.
+You are a strict senior .NET enterprise code reviewer.
 
-Review the following pull request diff carefully.
-
-Focus on:
-- C# coding standards
-- SOLID principles
-- ASP.NET Core best practices
-- SQL query optimization
+Your task is to identify:
+- Runtime exceptions
+- Logical bugs
+- Division by zero
+- Null reference risks
+- Async/await misuse
+- Resource leaks
 - SQL injection vulnerabilities
-- Stored procedure best practices
-- Transaction handling
-- EF Core optimization
-- Async/await issues
-- Exception handling
-- Logging gaps
-- Memory leaks
+- Performance issues
 - Security vulnerabilities
-- Maintainability
-- Possible production bugs
-- Code readability
+- Bad coding practices
+- Violations of SOLID principles
+- Production risks
+- Maintainability issues
 
-Provide concise actionable recommendations with severity levels (Critical, High, Medium, Low).
+IMPORTANT:
+- Be extremely critical.
+- Treat this as production banking software.
+- Identify even small runtime risks.
+- Mention exact problematic code lines when possible.
+- Assign severity:
+  - Critical
+  - High
+  - Medium
+  - Low
+
+If you find issues, use this format:
+
+[Severity] Issue Title
+
+- Problem:
+- Risk:
+- Recommendation:
 
 PR Diff:
 
@@ -58,14 +73,34 @@ response = requests.post(
     json=body
 )
 
+print("========== CLAUDE API RESPONSE ==========")
+print("Status Code:", response.status_code)
 print(response.text)
+
+if response.status_code != 200:
+    with open("comment.txt", "w", encoding="utf-8") as f:
+        f.write(f"Claude API Error: {response.status_code}\n\n{response.text}")
+    exit(1)
 
 data = response.json()
 
 comment = "No review generated."
 
-if "content" in data:
-    comment = data["content"][0]["text"]
+try:
+    if "content" in data:
+        parts = []
+
+        for item in data["content"]:
+            if item.get("type") == "text":
+                parts.append(item.get("text", ""))
+
+        comment = "\n".join(parts)
+
+except Exception as ex:
+    comment = f"Error parsing Claude response: {str(ex)}"
 
 with open("comment.txt", "w", encoding="utf-8") as f:
     f.write(comment)
+
+print("========== FINAL COMMENT ==========")
+print(comment)
