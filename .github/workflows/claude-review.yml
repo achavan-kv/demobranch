@@ -39,16 +39,43 @@ jobs:
 
           DIFF_CONTENT=$(head -c 120000 pr.diff)
 
+          PROMPT="You are an expert .NET and SQL enterprise code reviewer.
+
+Review the following pull request diff carefully.
+
+Focus on:
+- C# coding standards
+- SOLID principles
+- ASP.NET Core best practices
+- SQL query optimization
+- SQL injection vulnerabilities
+- Stored procedure best practices
+- Transaction handling
+- EF Core optimization
+- Async/await issues
+- Exception handling
+- Logging gaps
+- Memory leaks
+- Security vulnerabilities
+- Maintainability
+- Possible production bugs
+- Code readability
+
+Provide concise actionable recommendations with severity levels (Critical, High, Medium, Low).
+
+PR Diff:
+
+$DIFF_CONTENT"
+
           jq -n \
-            --arg diff "$DIFF_CONTENT" \
+            --arg prompt "$PROMPT" \
             '{
               model: "claude-3-5-sonnet-20241022",
               max_tokens: 2000,
               messages: [
                 {
                   role: "user",
-                  content:
-                  "You are an expert .NET and SQL enterprise code reviewer.\n\nReview the following pull request diff carefully.\n\nFocus on:\n- C# coding standards\n- SOLID principles\n- ASP.NET Core best practices\n- SQL query optimization\n- SQL injection vulnerabilities\n- Stored procedure best practices\n- Transaction handling\n- EF Core optimization\n- Async/await issues\n- Exception handling\n- Logging gaps\n- Memory leaks\n- Security vulnerabilities\n- Maintainability\n- Possible production bugs\n- Code readability\n\nProvide concise actionable recommendations with severity levels (Critical, High, Medium, Low).\n\nPR Diff:\n\n" + $diff
+                  content: $prompt
                 }
               ]
             }' > request.json
@@ -63,6 +90,8 @@ jobs:
             > review.json
 
           echo "Claude response received"
+
+          cat review.json
 
           COMMENT=$(jq -r '.content[0].text // "No review comments generated."' review.json)
 
