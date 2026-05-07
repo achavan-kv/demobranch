@@ -5,41 +5,207 @@ import requests
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 with open("pr.diff", "r", encoding="utf-8") as f:
-    diff = f.read()[:100000]
+    diff = f.read()
+
+# Prevent token overflow
+diff = diff[:120000]
 
 prompt = f"""
-You are an expert .NET and SQL enterprise code reviewer.
+You are a highly strict Principal .NET Architect, SQL Server Performance Expert, 
+Security Reviewer, and Enterprise Code Quality Auditor.
 
-Review the following pull request diff carefully.
+Your responsibility is to perform an enterprise-grade pull request review.
 
-Focus on:
-- C# coding standards
+Review the following PR diff very critically as if this code is going to production
+in a banking or mission-critical enterprise system.
+
+===========================================================
+REVIEW AREAS
+===========================================================
+
+1. .NET / C# Coding Standards
+- Naming conventions
 - SOLID principles
-- ASP.NET Core best practices
-- SQL query optimization
-- SQL injection vulnerabilities
-- Stored procedure best practices
-- Transaction handling
-- EF Core optimization
-- Async/await issues
-- Exception handling
-- Logging gaps
-- Memory leaks
-- Security vulnerabilities
-- Maintainability
-- Possible production bugs
+- DRY principle violations
+- Clean Architecture violations
 - Code readability
+- Maintainability
+- Reusability
+- Dependency Injection best practices
+- Class design issues
+- Method complexity
+- Large method/code smell detection
+- Magic strings/numbers
+- Hardcoded values
+- Dead code
+- Unused variables
+- Incorrect access modifiers
+- Incorrect use of static/shared state
+- Code duplication
 
-Provide concise actionable recommendations with severity levels (Critical, High, Medium, Low).
+2. Runtime & Exception Handling
+- DivideByZeroException
+- NullReferenceException
+- IndexOutOfRangeException
+- InvalidCastException
+- Potential crashes
+- Missing null checks
+- Missing validation
+- Improper exception handling
+- Empty catch blocks
+- Swallowed exceptions
+- Missing logging
+- Incorrect retry handling
+- Missing finally/dispose blocks
+- Resource leaks
 
-PR Diff:
+3. Async / Multithreading
+- Async/await misuse
+- Blocking async calls (.Result / .Wait())
+- Deadlock risks
+- Thread safety issues
+- Race conditions
+- Improper task handling
+- Fire-and-forget risks
+
+4. Performance Review
+- Inefficient loops
+- Multiple enumerations
+- Unnecessary object allocations
+- Memory leaks
+- Large object creation
+- Excessive LINQ usage
+- Premature ToList()
+- N+1 query problems
+- Expensive operations inside loops
+- Repeated DB calls
+- Large payload risks
+- High CPU operations
+- Inefficient string concatenation
+- Missing caching opportunities
+
+5. ASP.NET / API Review
+- API security issues
+- Missing input validation
+- Model validation gaps
+- Improper HTTP status codes
+- Incorrect middleware usage
+- Missing authentication/authorization
+- Sensitive data exposure
+- Insecure API design
+- Missing rate limiting concerns
+
+6. Logging & Monitoring
+- Missing structured logging
+- Missing correlation IDs
+- Missing telemetry
+- Insufficient diagnostics
+- Sensitive data logging risks
+
+7. Security Review
+- Hardcoded secrets
+- SQL Injection
+- Command Injection
+- XSS risks
+- Insecure deserialization
+- Sensitive data exposure
+- Authentication bypass risks
+- Authorization gaps
+- Encryption issues
+- Unsafe file handling
+- Path traversal risks
+
+8. Entity Framework / Database Review
+- Missing AsNoTracking()
+- Bad Include() usage
+- N+1 query problems
+- Missing transactions
+- SaveChanges inside loops
+- Poor query performance
+- Improper DB context lifetime
+- Lazy loading performance risks
+- Incorrect indexing assumptions
+
+9. SQL Server Review
+- SQL query optimization
+- Missing WHERE clauses
+- SELECT *
+- Missing indexes
+- Table scans
+- Missing parameterization
+- SQL injection vulnerabilities
+- Cursor misuse
+- Locking/blocking risks
+- Deadlock risks
+- Missing transactions
+- Inefficient joins
+- Missing pagination
+- Bad stored procedure practices
+- Non-SARGable queries
+- Scalar function performance issues
+- Temp table misuse
+- NOLOCK misuse
+- Incorrect transaction isolation
+
+10. Enterprise Production Readiness
+- Scalability concerns
+- High availability concerns
+- Fault tolerance gaps
+- Maintainability risks
+- Deployment risks
+- Configuration management issues
+- Environment-specific hardcoding
+
+===========================================================
+IMPORTANT REVIEW RULES
+===========================================================
+
+- Be EXTREMELY strict.
+- Identify even small issues.
+- Mention exact problematic code snippets if possible.
+- Prioritize runtime failures and production risks.
+- Do NOT say "looks good" unless truly perfect.
+- Always provide actionable recommendations.
+- Focus heavily on:
+  - Bugs
+  - Runtime exceptions
+  - Security
+  - Performance
+  - SQL optimization
+  - Production stability
+
+===========================================================
+OUTPUT FORMAT
+===========================================================
+
+For each issue use:
+
+[Severity] Issue Title
+
+Category:
+Problem:
+Risk:
+Recommendation:
+
+Severity values:
+- Critical
+- High
+- Medium
+- Low
+
+If no issues found, explicitly say:
+"No critical issues found, but continue monitoring code quality."
+
+===========================================================
+PR DIFF
+===========================================================
 
 {diff}
 """
 
 body = {
     "model": "claude-3-5-sonnet-20241022",
-    "max_tokens": 2000,
+    "max_tokens": 4000,
     "messages": [
         {
             "role": "user",
@@ -55,17 +221,40 @@ response = requests.post(
         "anthropic-version": "2023-06-01",
         "content-type": "application/json"
     },
-    json=body
+    json=body,
+    timeout=120
 )
 
+print("========== CLAUDE API RESPONSE ==========")
+print("Status Code:", response.status_code)
 print(response.text)
+
+if response.status_code != 200:
+    with open("comment.txt", "w", encoding="utf-8") as f:
+        f.write(
+            f"Claude API Error: {response.status_code}\n\n{response.text}"
+        )
+    exit(1)
 
 data = response.json()
 
 comment = "No review generated."
 
-if "content" in data:
-    comment = data["content"][0]["text"]
+try:
+    if "content" in data:
+        parts = []
+
+        for item in data["content"]:
+            if item.get("type") == "text":
+                parts.append(item.get("text", ""))
+
+        comment = "\n".join(parts)
+
+except Exception as ex:
+    comment = f"Error parsing Claude response: {str(ex)}"
 
 with open("comment.txt", "w", encoding="utf-8") as f:
     f.write(comment)
+
+print("========== FINAL REVIEW ==========")
+print(comment)
