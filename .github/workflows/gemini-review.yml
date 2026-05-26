@@ -29,6 +29,11 @@ jobs:
         run: |
           pip install google-generativeai requests
 
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh -y
+
       - name: Extract PR Diff
         env:
           GH_TOKEN: ${{ github.token }}
