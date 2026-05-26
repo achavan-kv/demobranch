@@ -1,0 +1,47 @@
+name: Gemini AI Code Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install google-generativeai requests
+
+      - name: Extract PR Diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > pr.diff
+
+      - name: Run Gemini Review
+        env:
+          GEMINI_API_KEY: ${{ secrets.PRKey }}
+        run: |
+          python .github/scripts/gemini_review.py
+
+      - name: Post Review Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: comment.txt
